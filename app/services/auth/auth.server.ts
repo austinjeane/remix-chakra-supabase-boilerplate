@@ -6,23 +6,25 @@ import { SESSION_SECRET } from "~/lib/config.server"
 import { db } from "~/lib/db.server"
 import { createToken, decryptToken } from "~/lib/jwt"
 
-import  { supabase }  from  "~/lib/supabaseClient.server"
+import { supabase } from "~/lib/supabaseClient.server"
 
 import { sendPasswordChangedEmail, sendResetPasswordEmail } from "../user/user.mailer.server"
 import { comparePasswords, hashPassword } from "./password.server"
 
-export async function login({ email, password }: { email: string; password: string }) {
+import { User as SupabaseUser, Session as SupabaseSession } from "@supabase/gotrue-js/src/lib/types"
+
+export async function login({ email, password }: { email: string; password: string }) : Promise<{ user?: SupabaseUser | null; session?: SupabaseSession | null; error?: string | null }> {
   const { user, session, error } = await supabase.auth.signIn({
-    email:email,
+    email: email,
     password: password,
   })
-  if (error) return { error: error.message  } 
+  if (error) return { error: error.message }
   if (!user) return { error: "Incorrect email or password" }
-  return { user }
+  return { user, session }
 }
 
 export async function sendResetPasswordLink({ email }: { email: string }) {
-  const { data, error } = await supabase.auth.api.resetPasswordForEmail(email, {redirectTo: `${process.env.WEB_URL}/reset-password/`})
+  const { data, error } = await supabase.auth.api.resetPasswordForEmail(email, { redirectTo: `${process.env.WEB_URL}/reset-password/` })
   if (error) { return { error } }
   return true
 }
@@ -43,19 +45,20 @@ export async function register(data: Prisma.UserCreateInput) {
   const { user, session, error } = await supabase.auth.signUp({
     email,
     password: data.password,
-  })
+  }, { redirectTo: `${process.env.WEB_URL}/login` })
   if (error) { return { error } }
+  if (!user) return { error: "Incorrect email or password" }
 
   const { data: user_data, error: user_error } = await supabase
-  .from('User')
-  .insert([
-    {
-      id: user.id,
-      email: user.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      role: "USER",
-    }])
+    .from('User')
+    .insert([
+      {
+        id: user.id,
+        email: user.email,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        role: "USER",
+      }])
   if (user_error) { return { error: user_error } }
 
   return { user: user_data }
@@ -73,9 +76,9 @@ const storage = createCookieSessionStorage({
   },
 })
 
-export async function createUserSession(userId: string, redirectTo: string) {
+export async function createUserSession(accessToken: string, redirectTo: string) {
   const session = await storage.getSession()
-  session.set("userId", userId)
+  session.set("access_token", accessToken)
   return redirect(redirectTo, {
     headers: {
       "Set-Cookie": await storage.commitSession(session),
@@ -83,28 +86,37 @@ export async function createUserSession(userId: string, redirectTo: string) {
   })
 }
 
-export async function getUserIdFromSession(request: Request) {
+export async function getUserAccessTokenFromSession(request: Request) {
   const session = await storage.getSession(request.headers.get("Cookie"))
-  const userId = session.get("userId")
-  if (!userId || typeof userId !== "string") return null
-  return userId
+  const accessToken = session.get("access_token")
+  if (!accessToken || typeof accessToken !== "string") return null
+  return accessToken
 }
 
-const getSafeUser = async (id: string) => {
-  const { data, error } = await supabase
+const getSafeUser = async (accessToken: string) => {
+  supabase.auth.setAuth(accessToken);
+
+  const { user, error } = await supabase.auth.api.getUser(accessToken);
+
+  if (error) return null
+  if (!user) return null
+
+  const { data, error: selectError } = await supabase
     .from('User')
     .select(`*`)
-    .eq('id', id)
+    .eq('id', user?.id)
     .single();
+  if (selectError) return null
   if (!data) return null
   return data
 }
 
 export async function getUser(request: Request) {
-  const id = await getUserIdFromSession(request)
-  if (!id) return null
+  const accessToken = await getUserAccessTokenFromSession(request)
+  console.log("get user access token", accessToken)
+  if (!accessToken) return null
   try {
-    return await getSafeUser(id)
+    return await getSafeUser(accessToken)
   } catch {
     return null
   }
@@ -117,7 +129,8 @@ export type CurrentUserJson = Omit<User, "password" | "createdAt" | "updatedAt">
 }
 
 export async function getCurrentUser(request: Request) {
-  const id = await getUserIdFromSession(request)
+  const id = await getUserAccessTokenFromSession(request)
+  console.log("get current user access token", id)
   if (!id) throw logout(request)
   try {
     const user = await getSafeUser(id)
@@ -129,7 +142,7 @@ export async function getCurrentUser(request: Request) {
 }
 
 export async function requireUser(request: Request, redirectTo: string = new URL(request.url).pathname) {
-  const id = await getUserIdFromSession(request)
+  const id = await getUserAccessTokenFromSession(request)
   if (!id) {
     const searchParams = new URLSearchParams([["redirectTo", redirectTo]])
     throw redirect(`/login?${searchParams}`)

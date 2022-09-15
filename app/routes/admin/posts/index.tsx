@@ -49,7 +49,7 @@ export default function Posts() {
     <c.Stack spacing={4}>
       <c.Flex justify="space-between">
         <c.Heading>Posts</c.Heading>
-        <LinkButton to="new" colorScheme="purple">
+        <LinkButton to="posts/new" colorScheme="purple">
           Create
         </LinkButton>
       </c.Flex>
