@@ -8,6 +8,7 @@ import { getUser } from "~/services/auth/auth.server"
 
 export const loader = async ({ request }: LoaderArgs) => {
   const user = await getUser(request)
+  console.log("user", user)
   return json(user)
 }
 

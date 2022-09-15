@@ -6,32 +6,32 @@ import { SESSION_SECRET } from "~/lib/config.server"
 import { db } from "~/lib/db.server"
 import { createToken, decryptToken } from "~/lib/jwt"
 
+import  { supabase }  from  "~/lib/supabaseClient.server"
+
 import { sendPasswordChangedEmail, sendResetPasswordEmail } from "../user/user.mailer.server"
 import { comparePasswords, hashPassword } from "./password.server"
 
 export async function login({ email, password }: { email: string; password: string }) {
-  const user = await db.user.findUnique({ where: { email } })
+  const { user, session, error } = await supabase.auth.signIn({
+    email:email,
+    password: password,
+  })
+  if (error) return { error: error.message  } 
   if (!user) return { error: "Incorrect email or password" }
-  const isCorrectPassword = await comparePasswords(password, user.password)
-  if (!isCorrectPassword) return { error: "Incorrect email or password" }
   return { user }
 }
 
 export async function sendResetPasswordLink({ email }: { email: string }) {
-  const user = await db.user.findUnique({ where: { email } })
-  if (user) {
-    const token = createToken({ id: user.id })
-    await sendResetPasswordEmail(user, token)
-  }
+  const { data, error } = await supabase.auth.api.resetPasswordForEmail(email, {redirectTo: `${process.env.WEB_URL}/reset-password/`})
+  if (error) { return { error } }
   return true
 }
 
 export async function resetPassword({ token, password }: { token: string; password: string }) {
   try {
-    const payload = decryptToken<{ id: string }>(token)
-    const hashedPassword = await hashPassword(password)
-    const user = await db.user.update({ where: { id: payload.id }, data: { password: hashedPassword } })
-    await sendPasswordChangedEmail(user)
+    const { error, data } = await supabase.auth.api.updateUser(token, {
+      password: password,
+    })
     return true
   } catch (error) {
     return false
@@ -40,11 +40,25 @@ export async function resetPassword({ token, password }: { token: string; passwo
 
 export async function register(data: Prisma.UserCreateInput) {
   const email = data.email.toLowerCase().trim()
-  const existing = await db.user.findFirst({ where: { email } })
-  if (existing) return { error: "User with these details already exists" }
-  const password = await hashPassword(data.password)
-  const user = await db.user.create({ data: { ...data, password } })
-  return { user }
+  const { user, session, error } = await supabase.auth.signUp({
+    email,
+    password: data.password,
+  })
+  if (error) { return { error } }
+
+  const { data: user_data, error: user_error } = await supabase
+  .from('User')
+  .insert([
+    {
+      id: user.id,
+      email: user.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      role: "USER",
+    }])
+  if (user_error) { return { error: user_error } }
+
+  return { user: user_data }
 }
 
 const storage = createCookieSessionStorage({
@@ -77,21 +91,13 @@ export async function getUserIdFromSession(request: Request) {
 }
 
 const getSafeUser = async (id: string) => {
-  const user = await db.user.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      createdAt: true,
-      email: true,
-      updatedAt: true,
-      role: true,
-    },
-  })
-  if (!user) return null
-  return user
+  const { data, error } = await supabase
+    .from('User')
+    .select(`*`)
+    .eq('id', id)
+    .single();
+  if (!data) return null
+  return data
 }
 
 export async function getUser(request: Request) {

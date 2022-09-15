@@ -27,7 +27,7 @@ export const action = async ({ request }: ActionArgs) => {
 
   const { user, error } = await register(data)
   if (error || !user) return badRequest({ data, formError: error })
-  return createUserSession(user.id, "/")
+  return createUserSession(user.id, "/verify-email")
 }
 
 export default function Register() {

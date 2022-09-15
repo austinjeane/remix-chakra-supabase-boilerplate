@@ -24,10 +24,10 @@ Comes with user authentication included
 **Must have node, yarn, postgres and redis installed and setup locally**
 
 1. `yarn install`
-2. `createdb boilerplate`
-3. `yarn db:migrate`
+2. `yarn db:migrate`
+3. `yarn build:remix`
 
-Make sure you have created a .env file in the api package with the right values, you can use .env.example as the template
+Make sure you have created a .env file in the api package with the right values, you can use .env.example as the template. Get your supabase connection string from your supabase dashboard under Settings->Database. Select Nodejs and replace  [YOUR-PASSWORD] with the password you created when creating the supabase project.
 
 We use Husky to run a couple of checks each commit (prettier, eslint & commitlint), make sure to add a
 .huskyrc file to your home directory ~/.huskyrc, and add this in:
